@@ -7,3 +7,6 @@ dist/
 *.db-shm
 data/
 *.log
+
+# Playwright MCP scratch output
+.playwright-mcp/

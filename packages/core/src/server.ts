@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import { createClaudeCodeArm } from "./arms/claude-code.ts";
 import { createDelegateCodeTool } from "./arms/delegate.ts";
@@ -8,10 +12,21 @@ import { env } from "./env.ts";
 import { createMemoryClient, createRememberTool } from "./memory.ts";
 import { SYSTEM_PROMPT } from "./persona.ts";
 import { createSession } from "./session.ts";
+import { createLookAtImageTool, createVision, SUPPORTED_MEDIA_TYPES } from "./vision.ts";
 
 const MAX_MESSAGE_LENGTH = 16_000;
+/** Screenshots are routinely a few MB once base64 inflates them by a third. */
+const MAX_BODY_BYTES = 25 * 1024 * 1024;
+const MAX_IMAGES_PER_MESSAGE = 4;
 
 const memory = createMemoryClient(env.mnemosyneUrl);
+
+const vision = createVision({
+  modelId: env.visionModel,
+  baseUrl: env.ollamaBaseUrl,
+  apiKey: env.ollamaApiKey,
+  imageDir: `${env.dataDir}/images`,
+});
 
 const delegateCode = createDelegateCodeTool({
   arms: [
@@ -34,12 +49,12 @@ const agent = createBrain({
   modelId: env.brainModel,
   baseUrl: env.ollamaBaseUrl,
   systemPrompt: SYSTEM_PROMPT,
-  tools: [createRememberTool(memory), delegateCode],
+  tools: [createRememberTool(memory), delegateCode, createLookAtImageTool(vision)],
 });
 
-const session = createSession(agent, memory, SYSTEM_PROMPT);
+const session = createSession(agent, memory, SYSTEM_PROMPT, vision);
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, bodyLimit: MAX_BODY_BYTES });
 
 const chatBodySchema = {
   type: "object",
@@ -47,11 +62,25 @@ const chatBodySchema = {
   additionalProperties: false,
   properties: {
     message: { type: "string", minLength: 1, maxLength: MAX_MESSAGE_LENGTH },
+    images: {
+      type: "array",
+      maxItems: MAX_IMAGES_PER_MESSAGE,
+      items: {
+        type: "object",
+        required: ["mediaType", "data"],
+        additionalProperties: false,
+        properties: {
+          mediaType: { type: "string", enum: SUPPORTED_MEDIA_TYPES },
+          data: { type: "string", minLength: 1 },
+        },
+      },
+    },
   },
 } as const;
 
 interface ChatBody {
   message: string;
+  images?: { mediaType: string; data: string }[];
 }
 
 /** Liveness only, no secrets, so it stays outside the front door. */
@@ -65,14 +94,52 @@ app.register(async (protectedRoutes) => {
     { schema: { body: chatBodySchema } },
     async (request, reply) => {
       try {
-        const { mode, reply: text } = await session.send(request.body.message);
-        return { mode, reply: text };
+        const stored = await Promise.all(
+          (request.body.images ?? []).map((image) => vision.store(image)),
+        );
+        const { mode, reply: text } = await session.send(request.body.message, stored);
+        return { mode, reply: text, images: stored };
       } catch (error) {
         request.log.error(error, "chat turn failed");
         const detail = error instanceof Error ? error.message : "Unknown brain failure";
         // GAIA is down when her brain is down; say so instead of pretending.
         return reply.code(502).send({ error: "Brain unavailable", detail });
       }
+    },
+  );
+
+  /**
+   * The conversation so far. The panel is a window onto a conversation that
+   * lives in this process, so a page reload reads it back instead of losing it.
+   */
+  protectedRoutes.get("/messages", () => ({
+    messages: session.transcript(),
+    busy: session.isBusy(),
+    model: env.brainModel,
+  }));
+
+  /** Serves back an image Paulo attached, so the panel can render it. */
+  protectedRoutes.get<{ Params: { id: string } }>(
+    "/images/:id",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: {
+            id: { type: "string", pattern: "^[0-9a-f-]{36}$" },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      for (const mediaType of SUPPORTED_MEDIA_TYPES) {
+        const bytes = await vision.read(request.params.id, mediaType).catch(() => undefined);
+        if (bytes !== undefined) {
+          return reply.type(mediaType).header("cache-control", "private, max-age=31536000").send(bytes);
+        }
+      }
+      return reply.code(404).send({ error: "No such image" });
     },
   );
 
@@ -101,6 +168,31 @@ app.register(async (protectedRoutes) => {
     });
   });
 });
+
+/**
+ * Serves the built panel, when there is one.
+ *
+ * Production never runs a dev server: an unbundled dev server serves hundreds of
+ * separate modules and leaks memory through its own watchers the longer it stays
+ * up, which is exactly the slowness the previous build suffered from. Here the
+ * panel is static files, and the panel's dev server proxies to this process.
+ */
+const panelDir = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../panel/dist",
+);
+
+if (existsSync(panelDir)) {
+  await app.register(fastifyStatic, { root: panelDir });
+  // Client-side routing: anything not matched by an API route is the app shell.
+  app.setNotFoundHandler((request, reply) => {
+    if (request.method !== "GET") return reply.code(404).send({ error: "Not found" });
+    return reply.sendFile("index.html");
+  });
+  app.log.info(`Serving the panel from ${panelDir}`);
+} else {
+  app.log.info("No panel build found; run `pnpm build:panel` to serve one");
+}
 
 const shutdown = async (signal: string): Promise<void> => {
   app.log.info(`${signal} received, shutting down`);

@@ -43,6 +43,13 @@ export const env = {
   ollamaBaseUrl: optional("OLLAMA_BASE_URL", "https://ollama.com/v1"),
   /** Swapping the brain is a one-line env change, never a refactor. */
   brainModel: optional("GAIA_BRAIN_MODEL", "glm-5.2"),
+  /**
+   * Her eye. The brain is text-only, so images are read by a separate model and
+   * only the reading enters the transcript. Declared, like every other model.
+   */
+  visionModel: optional("GAIA_VISION_MODEL", "qwen3.5:397b"),
+  /** Single known directory for this service's durable state. */
+  dataDir: optional("GAIA_DATA_DIR", "./data"),
   /** Memory's address travels in configuration, never in code. */
   mnemosyneUrl: required("MNEMOSYNE_URL").replace(/\/+$/, ""),
 

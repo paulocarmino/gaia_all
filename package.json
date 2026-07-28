@@ -8,6 +8,8 @@
     "dev:mnemosyne": "pnpm --filter @gaia/mnemosyne dev",
     "start:core": "pnpm --filter @gaia/core start",
     "start:mnemosyne": "pnpm --filter @gaia/mnemosyne start",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "build:panel": "pnpm --filter @gaia/panel build",
+    "dev:panel": "pnpm --filter @gaia/panel dev"
   }
 }
