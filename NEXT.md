@@ -1,221 +1,188 @@
 # NEXT
 
-State of GAIA at the end of the session of 2026-07-28. Read this before starting the next one.
+State of GAIA at the end of the session of 2026-07-28. Read this before starting
+the next one. There was a parallel session provisioning the VPS; its decisions
+are in ARCHITECTURE and CONVENTIONS, and everything below is still local (WSL).
 
 ---
 
 ## (a) What was built
 
-Steps 1, 2 and 4 of the build order in ARCHITECTURE.md, running locally on WSL:
-no k3s, no Docker, no manifests. Step 3 (backups) was deliberately deferred, see
-below.
+Build order steps 1, 2, 4 and 5 (VISION's first self-construction milestone),
+running locally: no k3s, no Docker, no manifests. Step 3 (backups) is
+deliberately deferred, see the revision in ARCHITECTURE.
 
 ### Layout
 
 ```
 gaiav2/
-  .env                      gitignored, the only place secrets live
-  .env.example              documented template
   packages/
-    core/                   the brain and her front door (port 3000)
+    core/                   brain + front door (port 3000, also serves the panel)
       src/env.ts            config parsed and validated at boot
       src/auth.ts           static bearer token, constant-time compare
-      src/ollama.ts         Ollama Cloud as a custom pi provider, shared by brain and arm
+      src/ollama.ts         Ollama Cloud as a custom pi provider
       src/brain.ts          the conversational agent
       src/persona.ts        system prompt
-      src/memory.ts         Mnemosyne client + the remember tool
+      src/memory.ts         Mnemosyne client + remember tool
+      src/vision.ts         her eye: reads images, look_at_image tool
       src/session.ts        the single live conversation, steering, recall
-      src/server.ts         routes
-      src/arms/
-        types.ts            the Arm interface
-        claude-code.ts      primary arm: the CLI as a subprocess
-        glm.ts              secondary arm: headless Pi with file and shell tools
-        workspace-tools.ts  read, write, list, run, scoped to the target repo
-        routing.ts          the v0 routing rule, one line
-        delegate.ts         the delegate_code tool + concurrency cap
-    mnemosyne/              memory as a separate service (port 3001)
-      src/schema.ts         Drizzle: memories(id, content, tags, created_at)
-      src/db.ts             better-sqlite3 + migrate-on-boot
-      src/memories.ts       remember / recall
-      src/server.ts         routes
-      drizzle/              generated migration
+      src/server.ts         routes + static panel
+      src/arms/             claude-code (primary), glm (secondary), routing, delegate
+    mnemosyne/              memory service (port 3001), SQLite via Drizzle
+    panel/                  React + Vite + Tailwind v4 + shadcn, mono/dark
 ```
 
 ### Running it
 
 ```bash
 pnpm start:mnemosyne     # first: the core recalls from it at boot
-pnpm start:core
+pnpm start:core          # serves the built panel at :3000
+pnpm dev:panel           # optional, HMR at :5173, proxies /api to the core
+pnpm build:panel         # what :3000 serves
 ```
 
-### HTTP surface
+### Verified by hand this session
 
-Core, all bearer-protected except `/health`:
+- **Panel**: token gate rejects empty/wrong tokens; conversation, markdown,
+  tables and code render; tool calls appear live; reload restores the thread,
+  the attached image and the eye's reading.
+- **Steering through the panel**: a message typed mid-run is marked
+  `↩ no meio do trabalho` and lands in the running turn.
+- **Vision**: attach/paste/drag an image, and she read a real error screenshot
+  5/5 correct (file, line, import, count, command). She used `look_at_image` to
+  double-check before answering.
+- **Delegation**: default route goes to Claude Code (proven from the tool args in
+  the event stream, not inferred); explicit request routes to glm; a correction
+  sent mid-build resumed the same arm session rather than starting over.
+- **Production**: Fastify serves the built bundle; she answered from memory with
+  no dev server involved.
 
-- `GET  /health` — liveness, current model, busy flag.
-- `POST /chat {message}` — starts a run, or steers into the live one. Returns
-  `{mode: "started"|"steered", reply}`.
-- `GET  /stream` — SSE of every agent event. The transport shape the panel should reuse.
+### Bugs worth remembering (all found by looking at the rendered page)
 
-Mnemosyne, no auth (loopback only, mirrors "Service with no Ingress"):
-`GET /health`, `POST /remember`, `POST /recall`.
-
-### Verified, not assumed
-
-Everything below was exercised by hand against the running services.
-
-- **Front door**: no token, wrong token, and `/stream` without a token all 401.
-- **Brain**: GLM-5.2 answers in ~1s, matching the language of the message.
-- **Memory**: `remember` called unprompted; recall survives a process restart.
-- **Steering**: with a run in flight, a second `POST /chat` returns `mode: "steered"`
-  and the SSE log shows the message injected *inside* the run — one `agent_start`,
-  one `agent_end`.
-- **Delegation, default route**: the tool args captured from `tool_execution_start`
-  show `arm` omitted, so the default (Claude Code) was selected. The arm edited
-  `src/slugify.ts`, ran the tests itself, and 4/4 passed on an independent re-run.
-  The test file was byte-identical afterwards: it fixed the code, not the tests.
-- **Delegation, explicit route**: asking for the cheap arm by name routed to glm,
-  which reached the same correct fix in ~20s against ~74s.
-- **Steering during a delegation**: a correction sent 25s into a multi-step build
-  reached the live run, and GAIA resumed the *same arm session*
-  (`resume_from: 65555e95-...`) to apply it rather than starting over.
-- **Honest reporting**: on the first attempt the arm could not run commands
-  (wrong permission mode). GAIA said so plainly instead of claiming success. Worth
-  keeping: that behaviour is a persona rule, and it is the thing that makes her
-  reports trustworthy.
-
-### Decisions revised this session
-
-Both were Paulo's calls, recorded as dated revisions in ARCHITECTURE.md rather
-than silent edits. The document now explains the `[Revised YYYY-MM-DD]` marker.
-
-1. **Backups are no longer a prerequisite.** v0 has not settled enough to know
-   what is worth backing up or where it goes, and Oracle Object Storage was never
-   more than a candidate. In exchange, a standing constraint: durable state lives
-   in one known directory per service, so adopting backups later stays a small job.
-   The risk statement in VISION is untouched and still true.
-2. **Routing v0 is inverted.** Claude Code is the primary arm; the cheap arm runs
-   on explicit request. While GAIA is being built, landing the change matters more
-   than what it costs.
-
-Also forced by reality rather than chosen: **qwen3-coder:480b no longer exists**
-in the Ollama Cloud catalog. The replacement is glm-5.2, picked on a measured
-bench (read unfamiliar code, find a real bug, edit, run tests, react): glm-5.2 and
-qwen3.5:397b both fixed it 3/3 with zero malformed tool calls and no test
-tampering, but glm-5.2 took 5.0 turns / 5.9s against 7.3 turns / 20.5s. That pool
-is metered by GPU time, so fewer turns is directly cheaper.
-
-### Deviations from the documents
-
-1. **Conversation transcript is not persisted.** ARCHITECTURE puts session state in
-   SQLite; only Mnemosyne is persisted. A restart begins a fresh conversation that
-   *remembers*. Closing this is small: a second SQLite store, or Pi's own session
-   storage.
-2. **Recall runs at boot, not on the first message.** Process start is conversation
-   start. The lazy version was written and removed: it opened a window where a
-   steered message could reach an agent that had not started and be dropped
-   silently. Cost: recall is recency-based, not ranked against the first message.
-3. **Retrieval is keyword overlap plus recency**, explicitly permitted by
-   ARCHITECTURE. No FTS5, no embeddings.
-4. **`@earendil-works/pi-*`, not `@mariozechner/pi-*`** — the scope named in
-   ARCHITECTURE is deprecated upstream, pointing at this one. Pinned exact.
-
-### Two traps worth remembering
-
-**Pi auto-detects OpenAI-compat quirks from the base URL.** For Ollama Cloud it
-guessed the `developer` role, and Ollama **drops that role silently** — no error.
-GAIA ran with no system prompt at all: no persona, no memories. It reads as a dumb
-model, not a bug. `ollama.ts` now declares its `compat` flags explicitly. Suspect
-this first if a new model starts ignoring its instructions.
-
-**An unattended arm cannot answer a permission prompt.** With `acceptEdits` the
-Claude Code arm edited files but silently could not run the tests, so it reported
-an unverified fix. The default is now `bypassPermissions`.
+- **React counted twice.** base-ui resolved React's CJS build while the app used
+  ESM. Fix: `resolve.dedupe` + `optimizeDeps.include` in the Vite config.
+- **`<img>` cannot send an Authorization header.** Attachments are fetched as
+  blobs with the token. Token in the query string would have worked and leaked
+  into history and logs.
+- **Duplicated messages and replies.** The optimistic message was not reconciled
+  with the stream's echo, and the in-flight reply was looked up only at the tail
+  of the list, so a steered message landing mid-list created a second entry.
+- **A border colour used as text colour.** Unreadable. `--color-term-line` is
+  borders only now; `--color-term-faint` is secondary text.
+- **An unattended arm cannot answer a permission prompt.** With `acceptEdits` the
+  Claude Code arm edited files but silently could not run tests, so it reported
+  an unverified fix. Default is now `bypassPermissions`.
 
 ---
 
 ## (b) Known loose ends
 
-- **`bypassPermissions` is a real choice, not a detail.** The arm runs shell
-  commands with no approval step. It is scoped to the workspace **by convention**
-  (the subprocess cwd and the tool's path checks), not by enforcement: nothing
-  stops a determined agent from `cd`-ing elsewhere. This is consistent with the
-  pruned security posture in VISION, which forbids building sandboxing, but it is
-  worth knowing plainly rather than discovering later.
-- **No backups, deliberately.** Until they exist, arms stay pointed at targets whose
-  loss would be an annoyance. Every new service keeps state in one known directory.
+**The big one, and the subject of the next session:** memory has no notion of a
+conversation, and recall is not associative. Details in (c).
+
+- **`bypassPermissions` is a real choice.** The arm runs shell commands with no
+  approval, scoped to the workspace **by convention** (subprocess cwd plus path
+  checks), not by enforcement. Consistent with VISION's pruned posture, which
+  forbids building sandboxing, but worth knowing rather than discovering.
+- **No backups, deliberately.** Until they exist, arms stay pointed at targets
+  whose loss would be an annoyance, and every service keeps durable state in one
+  known directory.
 - **No tested rollback path**, so **GAIA's own repo is out of bounds** as an arm
-  target. `GAIA_WORKSPACE_DIR` enforces this: her repo is not inside it. This is
-  the blocker for the self-construction mission, see below.
-- **No transcript persistence.** Restart = new conversation.
-- **No tests, no linter** in the GAIA repo itself. Everything was verified by hand.
-- **Steering is turn-granular, not token-granular.** A steered message lands at the
-  next turn boundary; work already in flight is not interrupted. Real interruption
-  is `agent.abort()`, which is not wired to any endpoint.
-- **Memory has no forget or update operation.** Only remember and recall. The store
-  currently holds contradictory rows about football from a steering test, which
-  GAIA correctly pointed out she cannot remove. Rows 1-2 are seed data from testing
-  Mnemosyne standalone. Nothing was deleted without asking.
-- **Context window is hardcoded at 128k** in `ollama.ts`, a guess, not a measured
-  value. No compaction is wired, so a long conversation will eventually overflow.
-  Pi ships compaction helpers.
-- **The arm bench was one bug in one small repo.** It measures tool-loop competence,
-  not large multi-file work. Do not over-read the glm-vs-qwen numbers.
-- **`GAIA_AUTH_TOKEN` was generated by me** with `openssl rand -hex 32`. Rotate it
-  if you want one you chose.
-- **Ollama Cloud requires a paid plan** for the good models, and `kimi-k3` is billed
-  *separately* from the subscription ("extra usage only"). If a 403 appears, check
-  billing before debugging code.
+  target (`GAIA_WORKSPACE_DIR` does not contain it).
+- **Nothing survives a core restart except Mnemosyne.** The transcript and the
+  image-to-message map are both in process memory. A page reload is fine; a
+  process restart is a blank conversation.
+- **No tests, no linter** in this repo. Everything was verified by hand.
+- **Steering is turn-granular.** A steered message lands at the next turn
+  boundary; work already in flight is not interrupted. `agent.abort()` exists and
+  is not wired to any endpoint.
+- **Memory has no forget or update.** The store currently holds junk from my
+  testing, including contradictory rows about football, and she correctly says she
+  cannot remove them. This is *why* she offered to resume one of my test threads.
+- **The eye is good at text, weak at shapes.** 5/5 on an error screenshot; it
+  miscounted bars in a synthetic chart. Fine for screenshots, do not trust it for
+  diagram geometry.
+- **Context window is a hardcoded 128k guess** with no compaction wired, so a
+  long conversation will eventually overflow. Pi ships compaction helpers.
+- **The panel bundle is 400kB** (124kB gzip) mostly because the full Geist and
+  Geist Mono families are embedded. Subsetting would cut most of it.
+- **Only tested in headless Chrome.** Paulo has not yet confirmed it in his own
+  browser.
 
 ---
 
 ## (c) Prompt for the next session
 
 > Read docs/VISION.md, docs/ARCHITECTURE.md and docs/CONVENTIONS.md in full, then
-> NEXT.md at the repo root, before writing any code. Everything marked [Decided] is
-> closed, and everything marked [Revised] wins over the text around it: do not
-> reopen, re-ask, or "improve" either. If you hit a situation the documents do not
-> cover, stop and ask me instead of inventing.
+> NEXT.md at the repo root, before writing any code. `[Decided]` is closed and
+> `[Revised]` wins over the text around it: do not reopen either. If the documents
+> do not cover something, stop and ask me.
 >
-> Session context: still local (WSL), no k3s. Secrets in the repo-root `.env`,
-> services run as Node processes via pnpm, no Kubernetes, no Docker. Start
-> Mnemosyne before the core.
+> Session context: still local (WSL). Secrets in the repo-root `.env`, services as
+> Node processes via pnpm. Start Mnemosyne before the core. Another session is
+> provisioning the VPS; do not touch infrastructure.
 >
-> Scope of this session: **the first self-construction mission, the panel**
-> (ARCHITECTURE build order step 5, VISION "Self-construction"). This is the
-> milestone VISION describes as recognizable: I open the panel, authenticate, and
-> talk to GAIA in an interface she built for herself, in a conversation she will
-> remember tomorrow.
+> Scope of this session: **conversations as a real concept, and memory that
+> actually associates across them.** Two halves of one problem.
 >
-> 1. React + Vite + TypeScript, Tailwind v4 (CSS-first `@theme`, never a v3-style
->    `tailwind.config.js`), shadcn/ui as the component base. It joins the monorepo
->    as a third package.
-> 2. **The transport must preserve mid-run steering.** ARCHITECTURE calls this a
->    hard requirement for every transport, and the panel is where it matters most.
->    `GET /stream` (SSE) plus `POST /chat` already exist and already do this;
->    consume them rather than inventing a new channel. I must be able to type a
->    second message while she is working and see it land in the running turn.
-> 3. Bearer token on every call, since the front door applies to the panel's API too.
-> 4. Design: CONVENTIONS is explicit that nothing may read as generic AI output.
->    Default shadcn gray-on-white, gradient hero, emoji feature cards, uniform
->    rounded-card soup all fail the bar. Use the impeccable.style skill. **Ask me
->    the specific questions you need about direction and personality before
->    building screens; do not fill the gap with defaults.**
+> **1. Conversations.** Today there is exactly one conversation, it lives in
+> process memory, and it dies on restart. I want a list of conversations in the
+> panel, the ability to start a new one, and to switch between them. That means
+> conversations and their transcripts get persisted (SQLite via Drizzle in the
+> core, per ARCHITECTURE Persistence, in one known directory per the standing
+> constraint). Pi has session storage (`jsonl-repo`, `memory-repo`, and a sqlite
+> storage package) — evaluate whether to use it or to store transcripts ourselves
+> with Drizzle like everything else, and say which you picked and why. Keep
+> steering working per conversation.
 >
-> How much of this GAIA builds herself is the interesting question, and it is mine
-> to answer: ask me before you start whether you are building the panel directly,
-> or driving it through her delegate_code tool as a real self-construction run.
-> Note that her own repo is deliberately outside `GAIA_WORKSPACE_DIR` because there
-> is no tested rollback path yet, so the second option needs that resolved first.
-> Raise it, do not route around it.
+> **2. Associative recall — the thing I actually miss from Hermes.** If I talked
+> about Naruto in conversation A and mention Kakashi in conversation B, she must
+> connect them and recall A. Today she cannot: Mnemosyne ranks by word overlap, and
+> "Kakashi" shares no word with "Naruto", so it scores zero.
 >
-> Out of scope: k8s manifests, backups, Docker, Postgres, memory consolidation.
+> I already probed this, so do not re-derive it:
 >
-> Session done criterion: I open the panel in a browser, authenticate, hold a
-> conversation with GAIA, send a message while she is still working and see it
-> reach her, then reload the page and she still knows what I told her.
+> - **Ollama Cloud does not serve embeddings.** `/v1/embeddings` is 404 and
+>   `/api/embed` returns 401 with the same key that works for chat (`/api/tags`
+>   returns 200, so it is not the token). This **invalidates** the line in
+>   ARCHITECTURE saying to source embeddings from Ollama Cloud "so nothing needs a
+>   local GPU". Record that as a dated revision.
+> - **The LLM itself works as the relevance filter, and it is enough for now.**
+>   Given a list of stored memories plus a new message, glm-5.2 returned
+>   `{"ids": [4], "porque": "...Kakashi... ligando-se diretamente à memória de que
+>   Paulo está revendo Naruto Shippuden"}` — it picked the Naruto memory and
+>   rejected pnpm, coffee and Neovim. 221 prompt tokens for 8 memories.
 >
-> When the done criterion passes, do not start the next phase. Rewrite NEXT.md with
-> the same three sections, where the prompt in (c) covers the consolidation CronJob
-> (build order step 6), translated to whatever the local equivalent of a scheduled
-> trigger is. Then stop.
+> So: build associative recall as an LLM relevance pass, not as a vector database.
+> It resolves the actual requirement with zero new infrastructure. Be honest about
+> where it stops working: every memory goes into the prompt, so a few hundred is
+> fine and a few thousand is not. Design it so a cheap pre-filter can slot in front
+> later (embeddings would then have to be local/CPU or another provider — do not
+> pick one now).
+>
+> **3. Two things that fall out of the above and are in scope.**
+>
+> - **Recall must use the conversation as its query, not just recency.** Boot-time
+>   recall pulls the 10 newest memories with no filter, which is why she greeted me
+>   by offering to resume a test thread that was not mine. That is the bug behind
+>   the symptom.
+> - **Memory needs forget/update.** She currently cannot remove a wrong or stale
+>   memory and correctly says so. The store also holds junk from my testing that
+>   needs clearing; ask me before deleting anything you did not create.
+>
+> Out of scope: k8s, backups, Docker, Postgres, memory consolidation (that is the
+> session after this one), and any change to the arms.
+>
+> Design note: the panel is mono-first, dark, terminal. v0 bar is plain and
+> functional but never careless. shadcn components come from the CLI, never written
+> by hand, and sizes come from the `--text-*` tokens. Ask me before inventing UI
+> for the conversation list; do not fill the gap with defaults.
+>
+> Session done criterion: I open the panel, see my conversations, start a new one,
+> talk about something in it, and in a *different* conversation mention something
+> related-but-not-identical and she connects it. Then I restart the core and my
+> conversations are still there.
+>
+> When it passes, do not start the next phase. Rewrite NEXT.md with the same three
+> sections, where (c) covers memory consolidation (build order step 6) as a
+> scheduled trigger, in whatever the local equivalent of a cron is. Then stop.
