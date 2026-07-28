@@ -46,3 +46,6 @@ Append-only. Format: `YYYY-MM-DD, decision, one-line why.`
 - 2026-07-28, TypeScript runs directly on Node's native type stripping (no tsx, no build step), `erasableSyntaxOnly` keeps the code honest about it.
 - 2026-07-28, memory retrieval is keyword overlap plus recency in plain Drizzle, ARCHITECTURE says start with the dumbest thing that works; upgrade to FTS5 or embeddings only when recall quality actually hurts.
 - 2026-07-28, recall runs once at process boot rather than lazily on the first message, doing it lazily opened a window where a steered message could reach an agent that had not started yet and be dropped silently.
+- 2026-07-28, backups reopened and deferred (Paulo), v0 has not settled enough to know what to back up or where, and backups are cheap to add late but expensive to add wrong; see ARCHITECTURE Backups.
+- 2026-07-28, durable state must live in one known directory per service, this is what keeps deferred backups cheap to adopt and is now a standing constraint on every new service.
+- 2026-07-28, default branch is `main`, plain preference over git's legacy `master`.

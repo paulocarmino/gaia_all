@@ -6,6 +6,8 @@ This records the decisions that were made and the reasoning behind each one. It 
 
 Anything marked **[Added in review]** was introduced during an external review pass and was not part of the original decision record. Treat those parts as strong recommendations that close real gaps, not as settled history. Everything else is settled: honor it, do not re-ask about it.
 
+Anything marked **[Revised YYYY-MM-DD]** is a decision Paulo deliberately reopened and changed after the fact. The revision wins over whatever the surrounding text used to say; the original reasoning is kept so the change is legible, not erased.
+
 ## Foundation: Pi as a dependency, not a fork
 
 GAIA is built on top of Pi (the `pi-agent-core` / `pi-ai` TypeScript agent toolkit), consumed as a dependency, never forked.
@@ -100,11 +102,24 @@ Conversation history and Pi session state need a home; the original record does 
 
 All credentials (Ollama Cloud API key, Claude Code token, anything a project needs) live in Kubernetes Secrets and are injected as environment variables. Never in the repo, never in manifests committed to git in plaintext, and never in Mnemosyne (see the memory section). This is hygiene, not security architecture; it costs nothing and prevents the dumbest class of leak in a system whose code and conversations are both long-lived.
 
-## Backups **[Added in review, load-bearing]**
+## Backups **[Added in review; revised 2026-07-28]**
 
-The vision's security posture explicitly leans on "regular backups" as the thing that turns deletion from tragedy into scare. No backup mechanism is specified anywhere in the original record. That makes this the single load-bearing operational requirement of the whole design: until it exists, the pruned posture's core justification is not yet true.
+The vision's security posture explicitly leans on "regular backups" as the thing that turns deletion from tragedy into scare. No backup mechanism is specified anywhere in the original record.
 
-Backup set: the Mnemosyne datastore, conversation and session state, any project volumes, plus a check that every repo has a git remote (git is its own backup for code). **[Decided]** Destination is Oracle Object Storage (S3-compatible, already on the same cloud account, near-zero cost at this volume), written by restic from a daily automated CronJob like everything else. Do a restore test once. Backups should exist no later than the moment GAIA first gets the ability to modify things Paulo cares about, which in the suggested build order below means early.
+The review pass called this the single load-bearing operational requirement and made it a prerequisite that had to land early in the build order.
+
+**[Revised 2026-07-28]** It is no longer a prerequisite. Paulo's reasoning: this is v0 and the shape of the thing is still being discovered, including whether Oracle Object Storage is even the right destination. Committing to a backup pipeline now means committing to guesses about what is worth backing up and where it goes, and building infrastructure around an architecture that has not settled. Backups are cheap to add late and expensive to add wrong.
+
+What this revision does and does not change:
+
+- **Still true:** until backups run, the pruned security posture's core justification is not yet earned. That is a statement about risk, and it does not expire. The vision document is unchanged on this point.
+- **Changed:** backups do not gate the next build steps. GAIA can gain arms and modify code before they exist, as long as she is pointed at targets whose loss would be an annoyance rather than a real loss.
+- **Reopened:** the destination. Oracle Object Storage (S3-compatible, same cloud account, near-zero cost at this volume) is the leading candidate, not a decision. restic remains the leading tool. Neither is settled.
+- **Unchanged:** the backup set, which is worth knowing now even though nothing writes it yet. The Mnemosyne datastore, conversation and session state, any project volumes, plus a check that every repo has a git remote (git is its own backup for code).
+
+**Prepare the path, do not build the pipeline.** The cost of deferring backups is only acceptable if adopting them later stays a small job. So, as a standing constraint on everything built from here: durable state lives in a small number of known, file-shaped locations under a single data directory per service, never scattered across a filesystem and never held only in a running process. If every service's state is one directory, then whatever tool and destination eventually win, backup is a matter of pointing them at those directories. Any design that makes state hard to enumerate is the thing this section is actually forbidding.
+
+The open question to close later, deliberately: tool, destination, schedule, and one restore test. Until then, treat "what would I lose if this machine died right now" as a question with a real answer, and keep that answer small.
 
 ## Access from multiple machines
 
@@ -135,7 +150,7 @@ Everything the first review pass left open was settled in conversation. For the 
 - Deploy loop: run-from-source (option 1) for GAIA; images per project later when deserved.
 - Monorepo tooling: plain pnpm workspaces.
 - Persistence: SQLite on a PVC.
-- Backups: restic to Oracle Object Storage, daily CronJob, restore tested once.
+- Backups: **[Reopened 2026-07-28]** no longer a prerequisite and no longer settled. restic to Oracle Object Storage is a candidate, not a decision. The standing requirement is that durable state stays enumerable in one directory per service so backups are cheap to adopt later. See the Backups section.
 - Front door: static bearer token in Fastify middleware.
 - Consolidation trigger: Kubernetes CronJob.
 - Brain unavailability: GAIA is down when her brain's API is down. No failover in v0.
@@ -145,7 +160,7 @@ Everything the first review pass left open was settled in conversation. For the 
 
 1. Repo, core Deployment skeleton, Secrets, front-door auth, and a minimal channel to the brain through Pi (a bare HTTP endpoint is enough). Steering must already work here.
 2. Mnemosyne MVP (remember, recall) wired so recall happens at conversation start.
-3. Backups of what exists so far, restore-tested. From this point GAIA may touch things that matter.
+3. ~~Backups of what exists so far, restore-tested.~~ **[Revised 2026-07-28]** Deferred, no longer a gate. Until it lands, GAIA's arms stay pointed at targets whose loss would be an annoyance, not a real loss.
 4. The delegate-code tool with both arms and the v0 routing rule.
 5. First self-construction mission: the panel, preserving mid-run steering in its transport.
 6. The consolidation CronJob.
