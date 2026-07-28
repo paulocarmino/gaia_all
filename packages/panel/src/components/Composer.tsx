@@ -97,7 +97,11 @@ export const Composer = ({
       ) : null}
 
       <div className="flex items-start gap-2">
-        <span className={`mt-1 select-none ${running ? "text-term-tool" : "text-term-gaia"}`}>
+        {/* Same leading as the textarea, so the first line of both sits on one
+            baseline. A margin would only ever be right at one font size. */}
+        <span
+          className={`select-none leading-[1.65] ${running ? "text-term-tool" : "text-term-gaia"}`}
+        >
           {running ? "↩" : ">"}
         </span>
         <textarea
