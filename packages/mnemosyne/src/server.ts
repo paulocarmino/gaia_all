@@ -8,14 +8,14 @@ const MAX_CONTENT_LENGTH = 4000;
 const DEFAULT_RECALL_LIMIT = 10;
 const MAX_RECALL_LIMIT = 50;
 
-const { db, sqlite, path } = openDatabase(env.dbPath);
+const { db, pool } = await openDatabase(env.databaseUrl);
 
 const app = Fastify({ logger: true });
 
 const toWire = (memory: Memory) => ({
   id: memory.id,
   content: memory.content,
-  tags: memory.tags === "" ? [] : memory.tags.split(","),
+  tags: memory.tags,
   createdAt: memory.createdAt.toISOString(),
 });
 
@@ -48,13 +48,16 @@ interface RecallBody {
   limit?: number;
 }
 
-app.get("/health", () => ({ status: "ok", store: path }));
+app.get("/health", async () => {
+  await pool.query("select 1");
+  return { status: "ok", store: "postgres" };
+});
 
 app.post<{ Body: RememberBody }>(
   "/remember",
   { schema: { body: rememberBodySchema } },
   async (request, reply) => {
-    const stored = remember(db, request.body.content, request.body.tags ?? []);
+    const stored = await remember(db, request.body.content, request.body.tags ?? []);
     return reply.code(201).send({ memory: toWire(stored) });
   },
 );
@@ -64,7 +67,7 @@ app.post<{ Body: RecallBody }>(
   { schema: { body: recallBodySchema } },
   async (request) => {
     const limit = request.body?.limit ?? DEFAULT_RECALL_LIMIT;
-    const found = recall(db, request.body?.query, limit);
+    const found = await recall(db, request.body?.query, limit);
     return { memories: found.map(toWire) };
   },
 );
@@ -72,7 +75,7 @@ app.post<{ Body: RecallBody }>(
 const shutdown = async (signal: string): Promise<void> => {
   app.log.info(`${signal} received, shutting down`);
   await app.close();
-  sqlite.close();
+  await pool.end();
   process.exit(0);
 };
 

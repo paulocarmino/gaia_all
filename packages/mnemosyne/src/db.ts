@@ -1,33 +1,25 @@
-import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import Database from "better-sqlite3";
-import type { Database as SqliteDatabase } from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { Pool } from "pg";
 import * as schema from "./schema.ts";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * Opens the store and brings it up to the current schema. Migrations run at
- * boot because this is a single-writer embedded database: there is no window
- * in which another process could be mid-migration.
+ * Opens the store and brings it up to the current schema.
+ *
+ * The same driver talks to the local container and to CloudNativePG on the VPS,
+ * so there is no dialect gap between development and production.
  */
-export const openDatabase = (
-  dbPath: string,
-): { db: ReturnType<typeof drizzle<typeof schema>>; sqlite: SqliteDatabase; path: string } => {
-  const absolutePath = resolve(packageRoot, dbPath);
-  mkdirSync(dirname(absolutePath), { recursive: true });
+export const openDatabase = async (connectionString: string) => {
+  const pool = new Pool({ connectionString, max: 5 });
+  const db = drizzle(pool, { schema });
 
-  const sqlite: SqliteDatabase = new Database(absolutePath);
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
+  await migrate(db, { migrationsFolder: resolve(packageRoot, "drizzle") });
 
-  const db = drizzle(sqlite, { schema });
-  migrate(db, { migrationsFolder: resolve(packageRoot, "drizzle") });
-
-  return { db, sqlite, path: absolutePath };
+  return { db, pool };
 };
 
-export type Db = ReturnType<typeof openDatabase>["db"];
+export type Db = Awaited<ReturnType<typeof openDatabase>>["db"];

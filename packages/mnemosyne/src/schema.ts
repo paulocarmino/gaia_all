@@ -1,19 +1,19 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /**
  * A single thing GAIA decided was worth remembering.
  *
- * Deliberately flat: one row is one note, in her own words. Structure can be
- * added when retrieval quality actually demands it, not before.
+ * Deliberately flat for now: one row is one note, in her own words. Tags are
+ * jsonb rather than a comma-joined string because Postgres can query inside
+ * them, which is what a comma-joined string was quietly preventing.
  */
-export const memories = sqliteTable(
+export const memories = pgTable(
   "memories",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: uuid("id").primaryKey().defaultRandom(),
     content: text("content").notNull(),
-    /** Free-form comma-separated labels, e.g. "preference,tooling". */
-    tags: text("tags").notNull().default(""),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("memories_created_at_idx").on(table.createdAt)],
 );

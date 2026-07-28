@@ -2,9 +2,12 @@
  * Configuration is declared, never hardcoded, and validated at boot so a
  * missing value fails loudly at start instead of silently at first request.
  */
-const optional = (name: string, fallback: string): string => {
+const required = (name: string): string => {
   const value = process.env[name];
-  return value === undefined || value.trim() === "" ? fallback : value.trim();
+  if (value === undefined || value.trim() === "") {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value.trim();
 };
 
 const port = (name: string, fallback: number): number => {
@@ -19,5 +22,5 @@ const port = (name: string, fallback: number): number => {
 
 export const env = {
   port: port("MNEMOSYNE_PORT", 3001),
-  dbPath: optional("MNEMOSYNE_DB_PATH", "./data/mnemosyne.db"),
+  databaseUrl: required("DATABASE_URL"),
 } as const;

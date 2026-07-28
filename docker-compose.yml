@@ -1,0 +1,35 @@
+# Local development database.
+#
+# Postgres 18 to match what CloudNativePG will run on the VPS (1.30.x supports
+# 14-18), so dev and production share a major and a dialect. The pgvector image
+# rather than plain postgres: it costs nothing now and means indexed vector
+# search is available the day brute force stops being fast enough.
+#
+# This container is only the database. GAIA herself is not containerised locally
+# (ARCHITECTURE, Build and deploy loop: run from source).
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: gaia-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gaia}
+      POSTGRES_USER: ${POSTGRES_USER:-gaia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Postgres 18+ wants the mount at /var/lib/postgresql, NOT at
+      # /var/lib/postgresql/data like 17 and earlier. It then keeps the cluster
+      # in a version-specific subdirectory so `pg_upgrade --link` can work
+      # without crossing a mount boundary. Using the old path crashloops.
+      - gaia-pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gaia} -d ${POSTGRES_DB:-gaia}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  gaia-pg:
