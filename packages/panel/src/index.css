@@ -138,6 +138,14 @@
   --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", "JetBrains Mono",
     "Fira Code", Menlo, monospace;
 
+  /* Type scale. Every size in the panel comes from here, so changing the whole
+     panel's reading size is an edit to these five values and nothing else. */
+  --text-micro: 0.72rem; /* dense hints */
+  --text-meta: 0.79rem; /* speakers, timestamps, tool lines */
+  --text-code: 0.86rem; /* inline code, tables */
+  --text-body: 0.94rem; /* what she and Paulo actually say */
+  --text-title: 1.29rem;
+
   --color-term-bg: oklch(0.17 0.008 265);
   --color-term-panel: oklch(0.21 0.009 265);
   /* Borders only. Using this as a text colour is unreadable. */
@@ -168,7 +176,7 @@
   body {
     background: var(--color-term-bg);
     color: var(--color-term-fg);
-    font-size: 13px;
+    font-size: var(--text-body);
     -webkit-font-smoothing: antialiased;
   }
   /* Hierarchy comes from spacing and colour, not from boxes and shadows. */

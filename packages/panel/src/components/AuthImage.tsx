@@ -49,10 +49,10 @@ export const AuthImage = ({
   }, [src, local]);
 
   if (failed) {
-    return <span className="text-term-alert text-[11px]">[imagem indisponível]</span>;
+    return <span className="text-term-alert text-meta">[imagem indisponível]</span>;
   }
   if (resolved === undefined) {
-    return <span className="text-term-faint text-[11px]">carregando imagem…</span>;
+    return <span className="text-term-faint text-meta">carregando imagem…</span>;
   }
   return <img src={resolved} alt={alt} className={className} />;
 };

@@ -21,7 +21,7 @@ const Status = ({
       : ["bg-term-gaia", "ociosa"];
 
   return (
-    <div className="flex items-center gap-2 text-[11px]">
+    <div className="flex items-center gap-2 text-meta">
       <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
       <span className="text-term-dim">{label}</span>
       {model !== undefined ? <span className="text-term-faint">· {model}</span> : null}
@@ -35,13 +35,13 @@ const Shell = ({ onLeave }: { onLeave: () => void }) => {
   return (
     <div className="mx-auto flex h-dvh max-w-3xl flex-col">
       <header className="border-term-line flex items-baseline justify-between border-b px-5 py-3">
-        <span className="text-term-gaia text-[11px] tracking-[0.3em] uppercase">gaia</span>
+        <span className="text-term-gaia text-meta tracking-[0.3em] uppercase">gaia</span>
         <div className="flex items-center gap-4">
           <Status connected={connected} running={running} model={health?.model} />
           <button
             type="button"
             onClick={onLeave}
-            className="text-term-faint hover:text-term-dim text-[10px] tracking-widest uppercase"
+            className="text-term-faint hover:text-term-dim text-micro tracking-widest uppercase"
           >
             sair
           </button>
@@ -53,7 +53,7 @@ const Shell = ({ onLeave }: { onLeave: () => void }) => {
       </main>
 
       {error !== null ? (
-        <div className="text-term-alert border-term-alert/40 border-t px-5 py-2 text-[11px]">
+        <div className="text-term-alert border-term-alert/40 border-t px-5 py-2 text-meta">
           {error}
         </div>
       ) : null}

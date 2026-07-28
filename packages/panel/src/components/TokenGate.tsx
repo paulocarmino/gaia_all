@@ -30,14 +30,14 @@ export const TokenGate = ({ onOpen }: { onOpen: () => void }) => {
     <div className="grid min-h-dvh place-items-center px-6">
       <form onSubmit={submit} className="w-full max-w-md">
         <div className="mb-10">
-          <div className="text-term-gaia mb-1 text-[11px] tracking-[0.3em] uppercase">gaia</div>
-          <h1 className="text-term-fg text-lg">porta da frente</h1>
-          <p className="text-term-dim mt-2 text-xs leading-relaxed">
+          <div className="text-term-gaia mb-1 text-meta tracking-[0.3em] uppercase">gaia</div>
+          <h1 className="text-term-fg text-title">porta da frente</h1>
+          <p className="text-term-dim mt-2 text-meta leading-relaxed">
             Ela executa código, aplica mudanças e guarda memória. Precisa de token.
           </p>
         </div>
 
-        <label className="text-term-dim block text-[11px] tracking-widest uppercase">
+        <label className="text-term-dim block text-meta tracking-widest uppercase">
           token
         </label>
         <div className="mt-2 flex items-baseline gap-2 border-b border-term-line pb-2 focus-within:border-term-user">
@@ -57,14 +57,14 @@ export const TokenGate = ({ onOpen }: { onOpen: () => void }) => {
 
         <div className="mt-3 h-4">
           {rejected ? (
-            <span className="text-term-alert text-xs">token recusado</span>
+            <span className="text-term-alert text-meta">token recusado</span>
           ) : null}
         </div>
 
         <Button
           type="submit"
           disabled={checking || value.trim() === ""}
-          className="border-term-line text-term-gaia hover:border-term-gaia hover:bg-term-gaia/8 disabled:text-term-faint mt-4 h-9 w-full rounded-none border bg-transparent font-mono text-[11px] tracking-[0.25em] uppercase shadow-none disabled:border-term-line/60"
+          className="border-term-line text-term-gaia hover:border-term-gaia hover:bg-term-gaia/8 disabled:text-term-faint mt-4 h-9 w-full rounded-none border bg-transparent font-mono text-meta tracking-[0.25em] uppercase shadow-none disabled:border-term-line/60"
         >
           {checking ? "verificando" : "entrar"}
         </Button>

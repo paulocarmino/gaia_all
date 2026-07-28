@@ -86,7 +86,7 @@ export const Composer = ({
               <button
                 type="button"
                 onClick={() => setPending((current) => current.filter((_, i) => i !== index))}
-                className="bg-term-bg text-term-dim hover:text-term-alert border-term-line absolute -top-1.5 -right-1.5 h-4 w-4 border text-[10px] leading-none"
+                className="bg-term-bg text-term-dim hover:text-term-alert border-term-line absolute -top-1.5 -right-1.5 h-4 w-4 border text-micro leading-none"
                 aria-label={`remover ${image.name}`}
               >
                 ×
@@ -143,7 +143,7 @@ export const Composer = ({
         }}
       />
 
-      <div className="text-term-faint mt-2 flex items-center gap-4 text-[10px]">
+      <div className="text-term-faint mt-2 flex items-center gap-4 text-micro">
         <span>enter envia · shift+enter quebra linha</span>
         <button
           type="button"
