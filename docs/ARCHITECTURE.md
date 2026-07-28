@@ -74,7 +74,12 @@ Rationale: declarative deploy is the natural fit for a self-constructing system,
 
 Mapping the conceptual design onto k3s:
 
-- The "reverse proxy" role is the **Ingress** (built into k3s): TLS termination plus subdomain routing. Use cert-manager for automatic certificates.
+- The "reverse proxy" role is **Envoy Gateway**, driven by Gateway API resources, with cert-manager for automatic Let's Encrypt certificates. **[Decided 2026-07-28]** k3s ships Traefik by default and it was installed with `--disable traefik`. Rationale: GAIA serves LLM responses over SSE, which is a long-lived connection that sits idle between tokens; Traefik applies request-style timeouts to those (documented 60s cuts on gRPC and websocket streaming) and has regressed on it across patch releases, while long-lived streams are Envoy's core design rather than a setting. `ingress-nginx` was not considered: it reached end of life in March 2026, as did its intended successor InGate, which also makes Gateway API the forward-compatible choice.
+  Cost accepted knowingly: one more component to operate, and no route-browsing GUI. Envoy Gateway exposes an admin console (config dump, stats, profiling) on localhost:19000; anything prettier means adding Grafana.
+
+  **Streaming requires an explicit policy. Measured 2026-07-28, not theory.** Envoy's default route timeout is 15s and it applies to streamed responses exactly like Traefik's does — an SSE stream through the Gateway was cut at 15s (`response_flags: UT`, `response_code_details: response_timeout`) while the same stream direct to the pod ran 100s clean. So the choice of Envoy did NOT make the problem disappear; it is stricter out of the box than Traefik's 60s. What it changed is the fix: a `BackendTrafficPolicy` with `timeout.http.requestTimeout: 0s` targeting the route, which is a namespaced Kubernetes resource that lives in git next to the route it applies to, rather than static proxy config. With the policy applied the same stream ran 199s uninterrupted (ended by the client, not the proxy).
+
+  **Consequence for every future route that streams:** an `HTTPRoute` serving SSE, websockets or gRPC streaming is broken by default and must ship with a matching `BackendTrafficPolicy`. This includes GAIA's own chat endpoint. Treat the policy as part of the route definition, not an optimisation.
 - Each project GAIA spins up is a **Deployment plus Service plus Ingress**, which gives it a subdomain (`project.yourdomain`) with HTTPS automatically. This is what makes "publish a new project" trivial in the self-construction flow: she writes the manifests, applies them, and returns the link.
 - Memory (Mnemosyne) is a **Service with NO Ingress.** It is therefore private by default: reachable only from inside the cluster or over the VPN, never from the public internet.
 - The GAIA core is the central **Deployment.**
@@ -90,7 +95,9 @@ Bonus for the future (noted, not built): the security separation that was pruned
 The original record says GAIA writes manifests and applies them, but never says how source code becomes a running container. For a self-constructing system this is the critical loop, and it must be settled before building. Two workable options, simplest first:
 
 1. **Run from source.** The core Deployment runs from a git checkout (cloned at boot or mounted), executed with node/tsx. "Deploy" is: push to git, restart the Deployment. No registry, no image builds, fastest possible inner loop. Weakness: a bad push can crashloop; mitigate with a startup health check and by keeping the previous checkout available for rollback.
-2. **Images via CI.** Code changes trigger an image build (GitHub Actions or in-cluster) pushed to a registry (ghcr.io), and the Deployment is updated by tag. More moving parts, but rollback is native (`kubectl rollout undo`) and the artifact is reproducible.
+2. **Images via CI.** Code changes trigger an image build pushed to a registry, and the Deployment is updated by tag. More moving parts, but rollback is native (`kubectl rollout undo`) and the artifact is reproducible.
+
+   **[Revised 2026-07-28]** The registry is **self-hosted inside the cluster**, not ghcr.io (the original text named ghcr.io; Paulo corrected it). The intended shape: a GitHub Actions runner operator (ARC) runs *in* the cluster, so CI builds and pushes over a ClusterIP Service and the kubelet pulls from that same Service. Image traffic never touches the ingress, which is what keeps large layers out of any proxy timeout, and it is also how CI reaches the cluster at all. Pushing from outside (a laptop) goes over Tailscale, still not through the public ingress. Which registry implementation is not chosen yet.
 
 **[Decided]** Option 1 for GAIA herself (the inner loop speed matters most while she is being built); option 2 adopted per project when a project deserves it. Whichever is chosen, a rollback path must exist and be exercised at least once before GAIA is allowed to modify herself. A self-modifying system without a tested rollback is a system that will eventually brick itself at the worst moment.
 
@@ -128,7 +135,11 @@ Paulo moves between a work Mac, a personal Windows/WSL machine, and a phone, alw
 Two access paths:
 
 - **Public HTTPS via subdomains,** through the Ingress (the panel and the projects). Works from anywhere, including behind the work VPN, because it is just a website.
-- **Private network (VPN)** for a CLI agent that talks directly to memory. Note: Tailscale was discussed as the tool for this but is NOT confirmed working in Paulo's current setup; treat it as an option to test, not a given. It is a split-tunnel style VPN and should coexist with the work OpenVPN (which is not oppressive), but this is unverified. **[Decided]** The VPN path is deferred out of v0 entirely; v0 ships with the public HTTPS path only. Deferred, not dropped: it comes back the moment a CLI agent needs direct memory access, and at that point Tailscale gets tested first, with the HTTPS-intermediated fallback below as plan B. Keep this pending item visible (it is listed in "Decisions closed after review"); it must not silently disappear.
+- **Private network (VPN).** **[Reopened and decided 2026-07-28]** The earlier decision deferred the VPN out of v0 entirely; Paulo reversed it. Tailscale is in, and its job is broader than the original framing: it is the access path to any port or DNS name that should not be on the public internet, the CLI agent talking directly to memory being one case among several. It is also expected to pair with the deploy-control tool planned for much later. It is a split-tunnel style VPN and should coexist with the work OpenVPN (which is not oppressive); this coexistence is still unverified in practice.
+
+  **Explicitly not the SSH path.** Tailscale must never become the only way into the box: if the daemon dies, the machine has to stay reachable. Hardened public SSH on port 22 (key-only, root login off, fail2ban) stays as the recovery door, and the VPN carries services only.
+
+  The HTTPS-intermediated fallback below remains valid for the async case, but it is now a convenience rather than plan B for a missing VPN.
 
 **Key security consequence:** memory has exactly two access paths, both controlled (in-cluster via the core, or VPN from outside), and never the public door. So the entire "secure the memory" concern reduces to "control who is on the VPN." Everything public (subdomains, panel, projects) can be public without risking memory, because memory lives in a different layer with no public route.
 
@@ -154,7 +165,7 @@ Everything the first review pass left open was settled in conversation. For the 
 - Front door: static bearer token in Fastify middleware.
 - Consolidation trigger: Kubernetes CronJob.
 - Brain unavailability: GAIA is down when her brain's API is down. No failover in v0.
-- VPN: deferred out of v0, explicitly tracked as a pending item for when a CLI agent needs direct memory access. Deferred, not forgotten.
+- VPN: **[Reopened 2026-07-28]** no longer deferred. Tailscale is adopted as the access path to everything that must not be public, and is explicitly not the SSH/admin path. See the Access paths section.
 
 ## Suggested build order **[Added in review, non-binding]**
 
