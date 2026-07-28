@@ -1,0 +1,13 @@
+{
+  "name": "gaia",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "dev:core": "pnpm --filter @gaia/core dev",
+    "dev:mnemosyne": "pnpm --filter @gaia/mnemosyne dev",
+    "start:core": "pnpm --filter @gaia/core start",
+    "start:mnemosyne": "pnpm --filter @gaia/mnemosyne start",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
