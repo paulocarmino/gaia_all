@@ -1,0 +1,76 @@
+import { Agent } from "@earendil-works/pi-agent-core";
+import type { AgentTool, QueueMode, StreamFn } from "@earendil-works/pi-agent-core";
+import { createModels, createProvider, envApiKeyAuth } from "@earendil-works/pi-ai";
+import type { Model } from "@earendil-works/pi-ai";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+
+const PROVIDER_ID = "ollama-cloud";
+
+/**
+ * Ollama Cloud is not in Pi's built-in catalog, but it speaks the OpenAI
+ * completions API, so it plugs in as an ordinary custom provider. Pi stays a
+ * dependency; nothing is forked.
+ */
+const buildModel = (modelId: string, baseUrl: string): Model<"openai-completions"> => ({
+  id: modelId,
+  name: modelId,
+  api: "openai-completions",
+  provider: PROVIDER_ID,
+  baseUrl,
+  reasoning: true,
+  input: ["text"],
+  // Ollama Cloud meters GPU time, not tokens, so per-token cost is not meaningful here.
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 128_000,
+  maxTokens: 8_192,
+  // Pi auto-detects these from the base URL, and it guesses wrong for Ollama
+  // Cloud: it picks the `developer` role, which Ollama silently drops, so the
+  // whole system prompt disappears. Declared explicitly instead of inferred.
+  compat: {
+    supportsDeveloperRole: false,
+    supportsStore: false,
+    maxTokensField: "max_tokens",
+  },
+});
+
+export interface OllamaAgentOptions {
+  modelId: string;
+  baseUrl: string;
+  systemPrompt: string;
+  tools: AgentTool<any>[];
+  steeringMode?: QueueMode;
+}
+
+/** Builds a Pi agent backed by one Ollama Cloud model. Used for the brain and for the cheap arm. */
+export const createOllamaAgent = ({
+  modelId,
+  baseUrl,
+  systemPrompt,
+  tools,
+  steeringMode = "all",
+}: OllamaAgentOptions): Agent => {
+  const models = createModels();
+
+  models.setProvider(
+    createProvider({
+      id: PROVIDER_ID,
+      name: "Ollama Cloud",
+      baseUrl,
+      auth: { apiKey: envApiKeyAuth("Ollama Cloud API key", ["OLLAMA_API_KEY"]) },
+      models: [buildModel(modelId, baseUrl)],
+      api: openAICompletionsApi(),
+    }),
+  );
+
+  const model = models.getModel(PROVIDER_ID, modelId);
+  if (!model) throw new Error(`Model not registered: ${modelId}`);
+
+  const streamFn: StreamFn = (requestModel, context, options) =>
+    models.streamSimple(requestModel, context, options);
+
+  return new Agent({
+    streamFn,
+    initialState: { systemPrompt, model, tools },
+    steeringMode,
+  });
+};

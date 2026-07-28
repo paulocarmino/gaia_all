@@ -1,4 +1,7 @@
 import Fastify from "fastify";
+import { createClaudeCodeArm } from "./arms/claude-code.ts";
+import { createDelegateCodeTool } from "./arms/delegate.ts";
+import { createGlmArm } from "./arms/glm.ts";
 import { requireBearerToken } from "./auth.ts";
 import { createBrain } from "./brain.ts";
 import { env } from "./env.ts";
@@ -10,11 +13,28 @@ const MAX_MESSAGE_LENGTH = 16_000;
 
 const memory = createMemoryClient(env.mnemosyneUrl);
 
+const delegateCode = createDelegateCodeTool({
+  arms: [
+    createClaudeCodeArm({
+      binary: env.claudeBinary,
+      timeoutMs: env.armTimeoutMs,
+      permissionMode: env.claudePermissionMode,
+    }),
+    createGlmArm({
+      modelId: env.armModel,
+      baseUrl: env.ollamaBaseUrl,
+      timeoutMs: env.armTimeoutMs,
+    }),
+  ],
+  workspaceDir: env.workspaceDir,
+  concurrency: env.armConcurrency,
+});
+
 const agent = createBrain({
   modelId: env.brainModel,
   baseUrl: env.ollamaBaseUrl,
   systemPrompt: SYSTEM_PROMPT,
-  tools: [createRememberTool(memory)],
+  tools: [createRememberTool(memory), delegateCode],
 });
 
 const session = createSession(agent, memory, SYSTEM_PROMPT);
